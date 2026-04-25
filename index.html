@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Deadlock Detection System</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI';
+            background: #0f172a;
+            color: white;
+        }
+
+        header {
+            text-align: center;
+            padding: 15px;
+            font-size: 22px;
+            font-weight: bold;
+            background: #020617;
+        }
+
+        .container {
+            display: flex;
+            height: 90vh;
+        }
+
+        .panel {
+            margin: 10px;
+            padding: 15px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.05);
+        }
+
+        .left { width: 25%; overflow-y: auto; }
+        .right { width: 25%; }
+        .center { flex: 1; }
+
+        input {
+            width: 100%;
+            padding: 6px;
+            margin: 4px 0;
+            border-radius: 6px;
+            border: none;
+            background: #1e293b;
+            color: white;
+        }
+
+        button {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border-radius: 6px;
+            border: none;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+
+        .status {
+            text-align: center;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .safe { background: #16a34a; }
+        .danger { background: #dc2626; }
+
+        #network { height: 75%; }
+
+        .log {
+            height: 300px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            margin-top: 10px;
+            border-collapse: collapse;
+        }
+
+        td, th {
+            border: 1px solid #444;
+            text-align: center;
+            padding: 3px;
+        }
+    </style>
+</head>
+
+<body>
+
+<header>🧠 Deadlock Detection System</header>
+
+<div class="container">
+
+<!-- LEFT PANEL -->
+<div class="panel left">
+
+    <h3>📊 System Generator</h3>
+    <input id="pCount" placeholder="No. of Processes">
+    <input id="rCount" placeholder="No. of Resources">
+    <button onclick="generateSystem()">Generate</button>
+
+    <div id="matrixArea"></div>
+
+    <button onclick="buildGraph()">Build Graph</button>
+    <button onclick="detect()">Detect Deadlock</button>
+
+</div>
+
+<!-- CENTER -->
+<div class="panel center">
+
+    <div id="status" class="status safe">✅ No Deadlock</div>
+    <div id="network"></div>
+
+</div>
+
+<!-- RIGHT -->
+<div class="panel right">
+
+    <h3>📜 Activity Logs</h3>
+    <div id="logs" class="log"></div>
+
+</div>
+
+</div>
+
+<script>
+
+let nodes = new vis.DataSet([]);
+let edges = new vis.DataSet([]);
+
+let network = new vis.Network(
+    document.getElementById("network"),
+    {nodes, edges},
+    {}
+);
+
+let processes = [];
+let resources = [];
+
+function log(msg){
+    document.getElementById("logs").innerHTML += msg + "<br>";
+}
+
+/* 🔹 GENERATE MATRIX */
+function generateSystem(){
+
+    let pCount = parseInt(document.getElementById("pCount").value);
+    let rCount = parseInt(document.getElementById("rCount").value);
+
+    if(!pCount || !rCount){
+        alert("Enter valid numbers");
+        return;
+    }
+
+    processes = [];
+    resources = [];
+
+    for(let i=1;i<=pCount;i++) processes.push("P"+i);
+    for(let i=1;i<=rCount;i++) resources.push("R"+i);
+
+    let html = "<h4>Request Matrix</h4><table>";
+    html += "<tr><th></th>";
+
+    resources.forEach(r => html += `<th>${r}</th>`);
+    html += "</tr>";
+
+    processes.forEach(p=>{
+        html += `<tr><td>${p}</td>`;
+        resources.forEach(r=>{
+            html += `<td><input type='number' min='0' id='req_${p}_${r}' value='0'></td>`;
+        });
+        html += "</tr>";
+    });
+
+    html += "</table>";
+
+    html += "<h4>Allocation Matrix</h4><table>";
+    html += "<tr><th></th>";
+
+    resources.forEach(r => html += `<th>${r}</th>`);
+    html += "</tr>";
+
+    processes.forEach(p=>{
+        html += `<tr><td>${p}</td>`;
+        resources.forEach(r=>{
+            html += `<td><input type='number' min='0' id='alloc_${p}_${r}' value='0'></td>`;
+        });
+        html += "</tr>";
+    });
+
+    html += "</table>";
+
+    document.getElementById("matrixArea").innerHTML = html;
+
+    log("System generated");
+}
+
+/* 🔹 BUILD GRAPH */
+function buildGraph(){
+
+    nodes.clear();
+    edges.clear();
+
+    processes.forEach(p=>{
+        nodes.update({id:p, label:p, shape:"circle", color:"#38bdf8"});
+    });
+
+    resources.forEach(r=>{
+        nodes.update({id:r, label:r, shape:"box", color:"#f59e0b"});
+    });
+
+    processes.forEach(p=>{
+        resources.forEach(r=>{
+
+            let req = document.getElementById(`req_${p}_${r}`).value;
+            let alloc = document.getElementById(`alloc_${p}_${r}`).value;
+
+            if(req > 0){
+                edges.add({from:p, to:r, arrows:"to"});
+            }
+
+            if(alloc > 0){
+                edges.add({from:r, to:p, arrows:"to", color:"#4ade80"});
+            }
+
+        });
+    });
+
+    log("Graph built from matrix");
+}
+
+/* 🔹 DETECT DEADLOCK (Frontend Logic) */
+function detect(){
+
+    let finish = {};
+    let work = {};
+
+    resources.forEach(r => work[r] = 0);
+    processes.forEach(p => finish[p] = false);
+
+    let changed = true;
+
+    while(changed){
+        changed = false;
+
+        processes.forEach(p=>{
+            if(!finish[p]){
+
+                let canRun = true;
+
+                resources.forEach(r=>{
+                    let req = parseInt(document.getElementById(`req_${p}_${r}`).value);
+                    if(req > work[r]) canRun = false;
+                });
+
+                if(canRun){
+                    resources.forEach(r=>{
+                        let alloc = parseInt(document.getElementById(`alloc_${p}_${r}`).value);
+                        work[r] += alloc;
+                    });
+
+                    finish[p] = true;
+                    changed = true;
+                }
+            }
+        });
+    }
+
+    let deadlocked = processes.filter(p => !finish[p]);
+
+    let status = document.getElementById("status");
+
+    if(deadlocked.length > 0){
+        status.innerText = "❌ Deadlock Detected";
+        status.className = "status danger";
+
+        log("❌ Deadlock detected!");
+        log("🔁 Deadlocked Processes: " + deadlocked.join(", "));
+
+        suggestSolution(deadlocked);
+
+    }else{
+        status.innerText = "✅ No Deadlock";
+        status.className = "status safe";
+        log("✅ System is safe");
+    }
+}
+
+/* 🔥 SMART TERMINATION */
+function suggestSolution(deadlocked){
+
+    log("<br>💡 Resolution Strategies:");
+
+    let maxResources = -1;
+    let terminateProcess = null;
+
+    deadlocked.forEach(p => {
+        let totalAlloc = 0;
+
+        resources.forEach(r => {
+            let val = parseInt(document.getElementById(`alloc_${p}_${r}`).value) || 0;
+            totalAlloc += val;
+        });
+
+        if(totalAlloc > maxResources){
+            maxResources = totalAlloc;
+            terminateProcess = p;
+        }
+    });
+
+    if(terminateProcess){
+        log(`🔴 Best: Terminate ${terminateProcess} (releases max resources)`);
+    }
+
+    log("🟡 Resource Preemption");
+    log("🔵 Resource Ordering");
+    log("🟢 Avoid Hold & Wait");
+    log("📌 Reason: Circular wait condition");
+}
+
+</script>
+
+</body>
+</html>
